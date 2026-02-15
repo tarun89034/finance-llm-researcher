@@ -3,10 +3,14 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install only essential runtime libs
+# Install runtime libs and musl for compatibility with abetlen wheels
 RUN apt-get update && apt-get install -y \
     libopenblas-dev \
+    musl \
     && rm -rf /var/lib/apt/lists/*
+
+# Fix for missing musl libc on Debian
+RUN ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1
 
 # Install llama-cpp-python first using pre-built wheels
 RUN pip install --no-cache-dir \
