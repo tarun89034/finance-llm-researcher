@@ -228,35 +228,17 @@ class ChatEngine:
     
     def format_data_context(self, data: List[TriangulatedData]) -> str:
         """
-        Format fetched data as context for the model.
-        
-        Args:
-            data: List of TriangulatedData objects
-            
-        Returns:
-            Formatted context string
+        Format fetched data as context for the model (compressed for speed).
         """
         if not data:
             return ""
         
-        lines = ["[LIVE DATA FROM MULTIPLE SOURCES]", ""]
-        
+        lines = ["### DATA CONTEXT:"]
         for d in data:
-            formatted_value = format_value(d.indicator_code, d.consensus_value)
-            fred_fmt = format_value(d.indicator_code, d.fred_value) if d.fred_value else "N/A"
-            wb_fmt = format_value(d.indicator_code, d.worldbank_value) if d.worldbank_value else "N/A"
-            oecd_fmt = format_value(d.indicator_code, d.oecd_value) if d.oecd_value else "N/A"
-            
-            lines.append(f"Country: {d.country_name} ({d.region})")
-            lines.append(f"Indicator: {d.indicator_name}")
-            lines.append(f"  FRED: {fred_fmt}")
-            lines.append(f"  World Bank: {wb_fmt}")
-            lines.append(f"  OECD: {oecd_fmt}")
-            lines.append(f"  Consensus: {formatted_value}")
-            lines.append(f"  Confidence: {d.confidence_level.title()}")
-            lines.append(f"  Assessment: {d.assessment_label}")
-            lines.append(f"  Period: {d.period}")
-            lines.append("")
+            val = format_value(d.indicator_code, d.consensus_value)
+            # Dense single-line format to save tokens and speed up TTFT
+            context_line = f"- {d.country_name} ({d.region}) | {d.indicator_name}: {val} | Conf: {d.confidence_level} | Assess: {d.assessment_label} | Period: {d.period}"
+            lines.append(context_line)
         
         return "\n".join(lines)
     

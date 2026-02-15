@@ -49,10 +49,10 @@ class ModelConfig:
     
     # Model parameters
     n_ctx: int = field(
-        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "2048"))
+        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "1024"))
     )
     n_threads: int = field(
-        default_factory=lambda: int(os.environ.get("MODEL_THREADS", "8"))
+        default_factory=lambda: int(os.environ.get("MODEL_THREADS", "4"))
     )
     n_gpu_layers: int = field(
         default_factory=lambda: int(os.environ.get("MODEL_GPU_LAYERS", "0"))
