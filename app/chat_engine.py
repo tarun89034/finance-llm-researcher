@@ -6,7 +6,8 @@ Orchestrates chat interactions with data integration.
 
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+import time
+from typing import Dict, List, Optional, Tuple, Any
 
 from model_loader import model_loader
 from data_fetcher import data_fetcher, get_data, TriangulatedData
@@ -263,7 +264,10 @@ class ChatEngine:
         # Fetch relevant data
         data = []
         if use_live_data:
+            start_fetch = time.time()
             data = self.fetch_relevant_data(intent)
+            fetch_duration = time.time() - start_fetch
+            logger.info(f"PROFILING: Data fetch took {fetch_duration:.2f}s")
         
         # Build enhanced prompt with data context
         data_context = self.format_data_context(data) if data else ""
@@ -276,9 +280,19 @@ class ChatEngine:
         # Generate response from model
         full_response = ""
         try:
+            start_gen = time.time()
+            first_token_time = None
+            
             for chunk in model_loader.generate_stream(enhanced_query):
+                if first_token_time is None:
+                    first_token_time = time.time()
+                    logger.info(f"PROFILING: Time to first token: {first_token_time - start_gen:.2f}s")
+                
                 full_response += chunk
                 yield chunk, None
+            
+            gen_duration = time.time() - start_gen
+            logger.info(f"PROFILING: Total generation took {gen_duration:.2f}s")
         except Exception as e:
             logger.error(f"Model generation error: {e}")
             error_msg = f"I apologize, but I encountered an error generating a response: {str(e)}"

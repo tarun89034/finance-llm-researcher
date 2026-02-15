@@ -87,7 +87,7 @@ class ModelLoader:
                 n_threads=model_config.n_threads,
                 n_gpu_layers=model_config.n_gpu_layers,
                 f16_kv=True,
-                n_batch=512,
+                n_batch=128,
                 verbose=False,
             )
             self.is_loaded = True
@@ -148,8 +148,8 @@ class ModelLoader:
             yield text
     
     def _build_prompt(self, user_input: str) -> str:
-        """Build the full prompt with shortened system instruction."""
-        system_instruction = """You are a senior financial analyst. Provide concise macroeconomic analysis using triangulated data from FRED, World Bank, and OECD. Assess confidence and risk for 12 indicators across 80+ countries."""
+        """Skeletal system prompt for maximum speed."""
+        system_instruction = "Senior Analyst. Provide concise analysis using data provided."
 
         return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
