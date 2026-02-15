@@ -43,17 +43,16 @@ class ModelConfig:
             "mistral-7b-instruct-v0.3.Q4_K_M.gguf"
         )
     )
-    
     # Local paths
     local_model_dir: str = "models"
     local_model_path: str = "models/financial-copilot.gguf"
     
     # Model parameters
     n_ctx: int = field(
-        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "768"))
+        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "512"))
     )
     n_threads: int = field(
-        default_factory=lambda: int(os.environ.get("MODEL_THREADS", "4"))
+        default_factory=lambda: int(os.environ.get("MODEL_THREADS", "8"))
     )
     n_gpu_layers: int = field(
         default_factory=lambda: int(os.environ.get("MODEL_GPU_LAYERS", "0"))
