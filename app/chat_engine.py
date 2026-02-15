@@ -264,16 +264,16 @@ class ChatEngine:
         self,
         user_query: str,
         use_live_data: bool = True
-    ) -> Tuple[str, List[TriangulatedData]]:
+    ):
         """
-        Generate a response to the user's query.
+        Generate a response to the user's query (streaming).
         
         Args:
             user_query: The user's input query
             use_live_data: Whether to fetch and include live data
             
-        Returns:
-            Tuple of (response_text, data_list)
+        Yields:
+            Chunks of text, and finally a list of TriangulatedData
         """
         # Detect intent
         intent = self.detect_intent(user_query)
@@ -292,17 +292,22 @@ class ChatEngine:
             enhanced_query = user_query
         
         # Generate response from model
+        full_response = ""
         try:
-            response = model_loader.generate(enhanced_query)
+            for chunk in model_loader.generate_stream(enhanced_query):
+                full_response += chunk
+                yield chunk, None
         except Exception as e:
             logger.error(f"Model generation error: {e}")
-            response = f"I apologize, but I encountered an error generating a response: {str(e)}"
+            error_msg = f"I apologize, but I encountered an error generating a response: {str(e)}"
+            yield error_msg, None
+            full_response = error_msg
         
         # Add to conversation history
         self.conversation_history.append({
             "query": user_query,
             "intent": intent,
-            "response": response,
+            "response": full_response,
             "data": data,
         })
         
@@ -310,7 +315,8 @@ class ChatEngine:
         if len(self.conversation_history) > 50:
             self.conversation_history = self.conversation_history[-50:]
         
-        return response, data
+        # Final yield of data
+        yield "", data
     
     def clear_history(self):
         """Clear conversation history."""
