@@ -204,32 +204,45 @@ with tab_chat:
                 st.warning(response)
                 data = []
             else:
-                with st.spinner("Analyzing..."):
-                    try:
-                        response, data = chat_engine.generate_response(prompt)
-                        st.markdown(response)
-                        
-                        if data:
-                            with st.expander("View Source Data"):
-                                for d in data:
-                                    if d.consensus_value is not None:
-                                        col1, col2, col3 = st.columns([2, 1, 1])
-                                        with col1:
-                                            st.write(f"**{d.country_name}** - {d.indicator_name}")
-                                        with col2:
-                                            st.write(f"{d.consensus_value:.2f}{d.unit}")
-                                        with col3:
-                                            st.write(f"{get_confidence_emoji(d.confidence_level)} {d.confidence_level}")
-                    except Exception as e:
-                        response = f"Error generating response: {e}"
-                        st.error(response)
-                        data = []
-            
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response,
-                "data": data
-            })
+                try:
+                    # Create a placeholder for the streaming response
+                    response_placeholder = st.empty()
+                    full_response = ""
+                    data = []
+                    
+                    # Generate streaming response
+                    for chunk, final_data in chat_engine.generate_response(prompt):
+                        if chunk:
+                            full_response += chunk
+                            response_placeholder.markdown(full_response + "▌")
+                        if final_data is not None:
+                            data = final_data
+                    
+                    # Final update without cursor
+                    response_placeholder.markdown(full_response)
+                    
+                    if data:
+                        with st.expander("View Source Data"):
+                            for d in data:
+                                if d.consensus_value is not None:
+                                    col1, col2, col3 = st.columns([2, 1, 1])
+                                    with col1:
+                                        st.write(f"**{d.country_name}** - {d.indicator_name}")
+                                    with col2:
+                                        st.write(f"{d.consensus_value:.2f}{d.unit}")
+                                    with col3:
+                                        st.write(f"{get_confidence_emoji(d.confidence_level)} {d.confidence_level}")
+                    
+                    # Store in history
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": full_response,
+                        "data": data
+                    })
+                except Exception as e:
+                    response = f"Error generating response: {e}"
+                    st.error(response)
+                    data = []
     
     # Show suggested questions if no messages
     if not st.session_state.messages:

@@ -87,6 +87,8 @@ class ModelLoader:
                 n_ctx=model_config.n_ctx,
                 n_threads=model_config.n_threads,
                 n_gpu_layers=model_config.n_gpu_layers,
+                f16_kv=True,
+                n_batch=512,
                 verbose=False,
             )
             self.is_loaded = True
@@ -112,13 +114,26 @@ class ModelLoader:
         temperature: Optional[float] = None,
         stop: Optional[list] = None
     ) -> str:
-        """Generate a response from the model."""
+        """Generate a response from the model (synchronous)."""
+        full_text = ""
+        for chunk in self.generate_stream(prompt, max_tokens, temperature, stop):
+            full_text += chunk
+        return full_text
+
+    def generate_stream(
+        self,
+        prompt: str,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        stop: Optional[list] = None
+    ):
+        """Generate a response from the model (streaming)."""
         if not self.is_loaded:
             self.load_model()
         
         full_prompt = self._build_prompt(prompt)
         
-        response = self._model(
+        stream = self._model(
             full_prompt,
             max_tokens=max_tokens or model_config.max_tokens,
             temperature=temperature or model_config.temperature,
@@ -126,21 +141,16 @@ class ModelLoader:
             top_k=model_config.top_k,
             repeat_penalty=model_config.repeat_penalty,
             stop=stop or ["### Instruction:", "### Input:", "</s>", "[/INST]"],
+            stream=True
         )
         
-        return response["choices"][0]["text"].strip()
+        for chunk in stream:
+            text = chunk["choices"][0]["text"]
+            yield text
     
     def _build_prompt(self, user_input: str) -> str:
-        """Build the full prompt with system instruction."""
-        system_instruction = """You are a senior financial analyst providing comprehensive macroeconomic analysis for 80+ countries worldwide. Your analysis must:
-
-1. Present data from multiple authoritative sources (FRED, World Bank, OECD)
-2. Calculate and present consensus values from triangulated data
-3. Assess confidence levels based on source agreement
-4. Provide risk or quality assessments appropriate to each indicator
-5. Contextualize findings within regional and income-level frameworks
-
-You analyze 12 key macroeconomic indicators: GDP Growth, Inflation, Unemployment, Interest Rate, GDP Per Capita, Current Account, Government Debt, FDI Inflows, Exchange Rate Change, Industrial Production, Consumer Confidence, and Trade Balance."""
+        """Build the full prompt with shortened system instruction."""
+        system_instruction = """You are a senior financial analyst. Provide concise macroeconomic analysis using triangulated data from FRED, World Bank, and OECD. Assess confidence and risk for 12 indicators across 80+ countries."""
 
         return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
