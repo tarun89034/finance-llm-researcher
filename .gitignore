@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Models (large files - downloaded at runtime)
+*.gguf
+app/models/
+models/
+
+# Environment (secrets - use HF Space Secrets instead)
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Streamlit
+.streamlit/
+
+# Misc
+*.log
+New folder/
