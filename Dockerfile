@@ -27,10 +27,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 
 # Create models directory for model downloads
-RUN mkdir -p /app/app/models
+RUN mkdir -p /app/models
 
 # Create a non-root user (required by HF Spaces)
-RUN useradd -m -u 1000 user
+RUN useradd -m -u 1000 user && \
+    chown -R user:user /app
 USER user
 
 # Set environment variables
