@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install llama-cpp-python first using pre-built wheels
 RUN pip install --no-cache-dir \
-    llama-cpp-python==0.3.16 \
+    llama-cpp-python==0.3.2 \
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
     --only-binary :all:
 
