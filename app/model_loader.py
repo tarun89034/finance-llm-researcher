@@ -48,7 +48,6 @@ class ModelLoader:
                 repo_id=model_config.hf_repo_id,
                 filename=model_config.hf_filename,
                 local_dir=str(local_dir),
-                local_dir_use_symlinks=False,
             )
             
             # Rename if necessary

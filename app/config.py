@@ -49,7 +49,7 @@ class ModelConfig:
     
     # Model parameters
     n_ctx: int = field(
-        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "512"))
+        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "2048"))
     )
     n_threads: int = field(
         default_factory=lambda: int(os.environ.get("MODEL_THREADS", "8"))
