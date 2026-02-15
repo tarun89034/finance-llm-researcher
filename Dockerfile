@@ -3,18 +3,20 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies for llama-cpp-python compilation
+# Install only essential runtime libs
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    git \
     libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies
+# Install llama-cpp-python first using pre-built wheels
+RUN pip install --no-cache-dir \
+    llama-cpp-python==0.3.16 \
+    --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+    --only-binary :all:
+
+# Copy and install other Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
