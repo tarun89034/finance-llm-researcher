@@ -6,6 +6,7 @@ WORKDIR /app
 # Install runtime libs and musl for compatibility with abetlen wheels
 RUN apt-get update && apt-get install -y \
     libopenblas-dev \
+    libgomp1 \
     musl \
     && rm -rf /var/lib/apt/lists/*
 
