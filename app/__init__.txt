@@ -1,0 +1,10 @@
+"""
+Financial LLM Copilot - Streamlit Application
+==============================================
+AI-powered macroeconomic analysis for 80+ countries with 12 indicators.
+
+Version: 2.0.0
+"""
+
+__version__ = "2.0.0"
+__author__ = "Financial LLM Copilot"
