@@ -12,7 +12,7 @@ app_port: 7860
 # Financial LLM Copilot
 
 <video width="100%" height="auto" controls>
-  <source src="https://raw.githubusercontent.com/tarun89034/finance-llm-researcher/main/files/financial_llm.mp4" type="video/mp4">
+  <source src="financial_llm.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
