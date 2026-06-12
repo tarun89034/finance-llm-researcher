@@ -1,8 +1,5 @@
 ---
 title: Financial LLM Copilot
-emoji: "\U0001F4CA"
-colorFrom: blue
-colorTo: green
 sdk: docker
 pinned: false
 license: openrail
