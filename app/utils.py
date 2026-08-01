@@ -113,6 +113,15 @@ def get_region_emoji(region: str) -> str:
     return emojis.get(region, "🌐")
 
 
+def get_source_mode_label(source_mode: str) -> str:
+    """Get a short display label for a data source mode."""
+    labels = {
+        "live": "🛰️ Live",
+        "modelled": "🧮 Modelled",
+    }
+    return labels.get(source_mode, source_mode.title())
+
+
 def get_income_level_display(income_level: str) -> str:
     """Get display text for income level."""
     displays = {

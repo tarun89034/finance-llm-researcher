@@ -16,10 +16,10 @@ st.set_page_config(
 )
 
 # Import application modules
-from config import app_config, model_config, validate_config
+from config import app_config, api_config, model_config, validate_config
 from countries import COUNTRIES, REGIONS, get_country_count
 from indicators import INDICATORS, get_indicator_options
-from data_fetcher import data_fetcher, get_data
+from data_fetcher import data_fetcher, get_data, get_many, clear_cache
 from model_loader import model_loader
 from chat_engine import chat_engine
 from visualizations import (
@@ -33,6 +33,7 @@ from utils import (
     get_region_emoji,
     get_income_level_display,
     format_percentage,
+    get_source_mode_label,
 )
 
 
@@ -50,6 +51,9 @@ if "selected_region" not in st.session_state:
 
 if "compare_countries" not in st.session_state:
     st.session_state.compare_countries = app_config.default_countries_compare.copy()
+
+if "use_live_data" not in st.session_state:
+    st.session_state.use_live_data = api_config.enable_live_data
 
 
 # =============================================================================
@@ -77,6 +81,31 @@ with st.sidebar:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to load model: {e}")
+    
+    st.divider()
+    
+    # Data Source Section
+    st.subheader("Data Source")
+    
+    use_live = st.toggle(
+        "Live API data",
+        value=st.session_state.use_live_data,
+        help=(
+            "Fetch from World Bank and FRED. Indicators or countries without "
+            "upstream coverage fall back to the regional baseline model."
+        ),
+    )
+    if use_live != st.session_state.use_live_data:
+        st.session_state.use_live_data = use_live
+        clear_cache()
+    
+    if use_live:
+        if api_config.fred_api_key:
+            st.caption("World Bank: open access | FRED: key configured")
+        else:
+            st.caption("World Bank: open access | FRED: no key, skipped")
+    else:
+        st.caption("Using modelled values only")
     
     st.divider()
     
@@ -122,7 +151,11 @@ with st.sidebar:
     # Quick Data Fetch Button
     if st.button("Fetch Data", use_container_width=True):
         with st.spinner("Fetching data..."):
-            data = get_data(selected_indicator, selected_country)
+            data = get_data(
+                selected_indicator,
+                selected_country,
+                live=st.session_state.use_live_data,
+            )
             
             if data.consensus_value is not None:
                 st.metric(
@@ -131,6 +164,7 @@ with st.sidebar:
                 )
                 st.caption(f"{get_confidence_emoji(data.confidence_level)} {data.confidence_level.title()} confidence")
                 st.caption(f"Assessment: {data.assessment_label}")
+                st.caption(f"{get_source_mode_label(data.source_mode)} | {data.source_note}")
             else:
                 st.warning("No data available")
     
@@ -140,6 +174,12 @@ with st.sidebar:
     if st.button("Clear Chat History", use_container_width=True):
         st.session_state.messages = []
         chat_engine.clear_history()
+        st.rerun()
+    
+    # Clear Cache Button
+    if st.button("Clear Data Cache", use_container_width=True):
+        clear_cache()
+        st.success(f"Cache cleared")
         st.rerun()
     
     st.divider()
@@ -211,7 +251,9 @@ with tab_chat:
                     data = []
                     
                     # Generate streaming response
-                    for chunk, final_data in chat_engine.generate_response(prompt):
+                    for chunk, final_data in chat_engine.generate_response(
+                        prompt, use_live_data=st.session_state.use_live_data
+                    ):
                         if chunk:
                             full_response += chunk
                             response_placeholder.markdown(full_response + "▌")
@@ -293,10 +335,20 @@ with tab_region:
         with st.spinner(f"Fetching data for {st.session_state.selected_region}..."):
             region_data = data_fetcher.get_region_data(
                 region_indicator,
-                st.session_state.selected_region
+                st.session_state.selected_region,
+                live=st.session_state.use_live_data,
             )
             
             if region_data:
+                # Show live data status
+                live_count = sum(1 for d in region_data if d.is_live)
+                if live_count > 0:
+                    st.info(
+                        f"🛰️ {live_count} of {len(region_data)} countries resolved from live APIs"
+                    )
+                else:
+                    st.info("🧮 Using modelled values (no live coverage for this indicator)")
+                
                 # Create and display chart
                 chart = create_region_bar_chart(region_data, region_indicator)
                 st.plotly_chart(chart, use_container_width=True)
@@ -342,9 +394,20 @@ with tab_ranking:
     
     if st.button("Load Global Rankings", key="load_ranking_btn"):
         with st.spinner("Fetching global data..."):
-            ranking_data = data_fetcher.get_global_ranking(ranking_indicator, limit=top_n)
+            ranking_data = data_fetcher.get_global_ranking(
+                ranking_indicator, limit=top_n, live=st.session_state.use_live_data
+            )
             
             if ranking_data:
+                # Show live data status
+                live_count = sum(1 for d in ranking_data if d.is_live)
+                if live_count > 0:
+                    st.info(
+                        f"🛰️ {live_count} of {len(ranking_data)} countries resolved from live APIs"
+                    )
+                else:
+                    st.info("🧮 Using modelled values (no live coverage for this indicator)")
+                
                 # Create and display chart
                 chart = create_global_ranking_chart(ranking_data, ranking_indicator, top_n)
                 st.plotly_chart(chart, use_container_width=True)
@@ -398,12 +461,22 @@ with tab_compare:
     
     if compare_countries and st.button("Compare Countries", key="compare_btn"):
         with st.spinner("Fetching comparison data..."):
-            comparison_data = []
-            for code in compare_countries:
-                data = get_data(compare_indicator, code)
-                comparison_data.append(data)
+            comparison_data = get_many(
+                compare_indicator,
+                compare_countries,
+                live=st.session_state.use_live_data,
+            )
             
             if comparison_data:
+                # Show live data status
+                live_count = sum(1 for d in comparison_data if d.is_live)
+                if live_count > 0:
+                    st.info(
+                        f"🛰️ {live_count} of {len(comparison_data)} countries resolved from live APIs"
+                    )
+                else:
+                    st.info("🧮 Using modelled values (no live coverage for this indicator)")
+                
                 # Create and display chart
                 chart = create_comparison_chart(comparison_data, compare_indicator)
                 st.plotly_chart(chart, use_container_width=True)

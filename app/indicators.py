@@ -22,6 +22,23 @@ class IndicatorConfig:
     decimal_places: int
     color: str
 
+    # --- Live data source mappings -------------------------------------------
+    # FRED series ID template; "{country}" is substituted with the two-letter
+    # FRED country code (see countries.FRED_COUNTRY_CODES). None = unsupported.
+    fred_series_template: Optional[str] = None
+    # World Bank indicator code, queried via /country/{iso3}/indicator/{code}.
+    worldbank_indicator: Optional[str] = None
+    # OECD SDMX dataset ID. Reserved: the OECD client is not implemented yet.
+    oecd_dataset: Optional[str] = None
+    # Plausible bounds used to reject obviously bad upstream observations.
+    value_range: Tuple[float, float] = (float("-inf"), float("inf"))
+    # True when the World Bank series is a *level* and the indicator we expose
+    # is an annual rate of change, so it must be derived from two observations.
+    worldbank_derive_yoy: bool = False
+    # For inverted levels (e.g. local-currency-per-USD), a fall in the level
+    # means appreciation, so the derived year-over-year change is negated.
+    worldbank_invert_yoy: bool = False
+
 
 INDICATORS: Dict[str, IndicatorConfig] = {
     "gdp_growth": IndicatorConfig(
@@ -34,7 +51,11 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="📈",
         higher_is_better=True,
         decimal_places=2,
-        color="#2ecc71"
+        color="#2ecc71",
+        fred_series_template="{country}GDPRQPSMEI",
+        worldbank_indicator="NY.GDP.MKTP.KD.ZG",
+        oecd_dataset="QNA",
+        value_range=(-15.0, 20.0)
     ),
     "inflation": IndicatorConfig(
         code="inflation",
@@ -46,7 +67,11 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="💰",
         higher_is_better=False,
         decimal_places=2,
-        color="#e74c3c"
+        color="#e74c3c",
+        fred_series_template="{country}CPIALLMINMEI",
+        worldbank_indicator="FP.CPI.TOTL.ZG",
+        oecd_dataset="PRICES_CPI",
+        value_range=(-5.0, 100.0)
     ),
     "unemployment": IndicatorConfig(
         code="unemployment",
@@ -58,7 +83,11 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="👥",
         higher_is_better=False,
         decimal_places=2,
-        color="#9b59b6"
+        color="#9b59b6",
+        fred_series_template="LMUNRRTT{country}M156S",
+        worldbank_indicator="SL.UEM.TOTL.ZS",
+        oecd_dataset="LFS_SEXAGE_I_R",
+        value_range=(0.0, 35.0)
     ),
     "interest_rate": IndicatorConfig(
         code="interest_rate",
@@ -70,7 +99,11 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="🏦",
         higher_is_better=None,
         decimal_places=2,
-        color="#3498db"
+        color="#3498db",
+        fred_series_template="INTDSR{country}M193N",
+        worldbank_indicator="FR.INR.RINR",
+        oecd_dataset="MEI_FIN",
+        value_range=(0.0, 50.0)
     ),
     "gdp_per_capita": IndicatorConfig(
         code="gdp_per_capita",
@@ -82,7 +115,9 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="💵",
         higher_is_better=True,
         decimal_places=0,
-        color="#1abc9c"
+        color="#1abc9c",
+        worldbank_indicator="NY.GDP.PCAP.CD",
+        value_range=(200.0, 150000.0)
     ),
     "current_account": IndicatorConfig(
         code="current_account",
@@ -94,7 +129,9 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="⚖️",
         higher_is_better=None,
         decimal_places=2,
-        color="#f39c12"
+        color="#f39c12",
+        worldbank_indicator="BN.CAB.XOKA.GD.ZS",
+        value_range=(-30.0, 40.0)
     ),
     "government_debt": IndicatorConfig(
         code="government_debt",
@@ -106,7 +143,9 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="📊",
         higher_is_better=False,
         decimal_places=1,
-        color="#e67e22"
+        color="#e67e22",
+        worldbank_indicator="GC.DOD.TOTL.GD.ZS",
+        value_range=(0.0, 300.0)
     ),
     "fdi_inflows": IndicatorConfig(
         code="fdi_inflows",
@@ -118,7 +157,9 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="🌐",
         higher_is_better=True,
         decimal_places=2,
-        color="#27ae60"
+        color="#27ae60",
+        worldbank_indicator="BX.KLT.DINV.WD.GD.ZS",
+        value_range=(-10.0, 30.0)
     ),
     "exchange_rate_change": IndicatorConfig(
         code="exchange_rate_change",
@@ -130,7 +171,14 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="💱",
         higher_is_better=None,
         decimal_places=2,
-        color="#8e44ad"
+        color="#8e44ad",
+        # PA.NUS.FCRF is a level (local currency units per USD), so the annual
+        # change must be derived. A falling LCU/USD level means the local
+        # currency strengthened, hence the sign is inverted.
+        worldbank_indicator="PA.NUS.FCRF",
+        value_range=(-50.0, 50.0),
+        worldbank_derive_yoy=True,
+        worldbank_invert_yoy=True
     ),
     "industrial_production": IndicatorConfig(
         code="industrial_production",
@@ -142,7 +190,11 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="🏭",
         higher_is_better=True,
         decimal_places=2,
-        color="#34495e"
+        color="#34495e",
+        fred_series_template="{country}PRMNTO01GYSAM",
+        worldbank_indicator="NV.IND.TOTL.KD.ZG",
+        oecd_dataset="MEI",
+        value_range=(-30.0, 30.0)
     ),
     "consumer_confidence": IndicatorConfig(
         code="consumer_confidence",
@@ -154,7 +206,11 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="😊",
         higher_is_better=True,
         decimal_places=1,
-        color="#16a085"
+        color="#16a085",
+        # No FRED or World Bank equivalent; only OECD publishes this, and the
+        # OECD client is not implemented, so this indicator stays modelled.
+        oecd_dataset="MEI_CLI",
+        value_range=(50.0, 150.0)
     ),
     "trade_balance": IndicatorConfig(
         code="trade_balance",
@@ -166,7 +222,9 @@ INDICATORS: Dict[str, IndicatorConfig] = {
         icon="🚢",
         higher_is_better=None,
         decimal_places=2,
-        color="#2980b9"
+        color="#2980b9",
+        worldbank_indicator="NE.RSB.GNFS.ZS",
+        value_range=(-40.0, 50.0)
     ),
 }
 

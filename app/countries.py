@@ -20,6 +20,55 @@ class CountryInfo:
     flag_emoji: str
 
 
+# =============================================================================
+# LIVE DATA SOURCE CODE MAPPINGS
+# =============================================================================
+# FRED builds series IDs from two-letter country codes rather than ISO-3, so
+# indicator templates such as "LMUNRRTT{country}M156S" need this lookup.
+# Countries absent from this map have no FRED coverage in this project.
+FRED_COUNTRY_CODES: Dict[str, str] = {
+    "USA": "US", "CAN": "CA", "MEX": "MX",
+    "BRA": "BR", "ARG": "AR", "CHL": "CL", "COL": "CO", "PER": "PE", "VEN": "VE",
+    "GBR": "UK", "DEU": "DE", "FRA": "FR", "NLD": "NL", "BEL": "BE", "CHE": "CH",
+    "AUT": "AT", "IRL": "IE",
+    "SWE": "SE", "NOR": "NO", "DNK": "DK", "FIN": "FI",
+    "ITA": "IT", "ESP": "ES", "PRT": "PT", "GRC": "GR", "SVN": "SI", "HRV": "HR",
+    "POL": "PL", "CZE": "CZ", "HUN": "HU", "ROU": "RO", "BGR": "BG", "UKR": "UA",
+    "SVK": "SK", "RUS": "RU",
+    "CHN": "CN", "JPN": "JP", "KOR": "KR", "TWN": "TW", "HKG": "HK",
+    "IND": "IN", "PAK": "PK", "BGD": "BD",
+    "IDN": "ID", "THA": "TH", "VNM": "VN", "MYS": "MY", "SGP": "SG", "PHL": "PH",
+    "SAU": "SA", "ARE": "AE", "ISR": "IL", "TUR": "TR", "IRN": "IR", "QAT": "QA",
+    "KWT": "KW",
+    "EGY": "EG", "MAR": "MA", "ZAF": "ZA", "NGA": "NG", "KEN": "KE",
+    "AUS": "AU", "NZL": "NZ",
+    "EUU": "EU",
+}
+
+# OECD member states. Reserved for the OECD SDMX client, which is not wired up.
+OECD_MEMBERS: frozenset = frozenset({
+    "AUS", "AUT", "BEL", "CAN", "CHE", "CHL", "COL", "CZE", "DEU", "DNK", "ESP",
+    "EST", "EUU", "FIN", "FRA", "GBR", "GRC", "HUN", "IRL", "ISL", "ISR", "ITA",
+    "JPN", "KOR", "LTU", "LUX", "LVA", "MEX", "NLD", "NOR", "NZL", "POL", "PRT",
+    "SVK", "SVN", "SWE", "TUR", "USA",
+})
+
+
+def get_fred_code(country_code: str) -> Optional[str]:
+    """Return the FRED two-letter code for a country, or None if unsupported."""
+    return FRED_COUNTRY_CODES.get(country_code)
+
+
+def get_worldbank_code(country_code: str) -> str:
+    """Return the World Bank country code (the ISO-3 code is used directly)."""
+    return country_code
+
+
+def is_oecd_member(country_code: str) -> bool:
+    """Return True when the country is an OECD member."""
+    return country_code in OECD_MEMBERS
+
+
 # Comprehensive country database
 COUNTRIES: Dict[str, CountryInfo] = {
     # North America

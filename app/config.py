@@ -34,7 +34,7 @@ class ModelConfig:
     hf_repo_id: str = field(
         default_factory=lambda: os.environ.get(
             "HF_REPO_ID",
-            "your-username/financial-copilot-80countries-12indicators-gguf"
+            "ty8890/financial-copilot-80countries-12indicators-gguf"
         )
     )
     hf_filename: str = field(
@@ -89,6 +89,38 @@ class APIConfig:
     # Request settings
     timeout: int = 30
     max_retries: int = 3
+
+    # --- Live data settings --------------------------------------------------
+    # Master switch. When disabled, every lookup uses the modelled fallback.
+    enable_live_data: bool = field(
+        default_factory=lambda: os.environ.get(
+            "ENABLE_LIVE_DATA", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+    )
+    # Per-request timeout for single-country lookups.
+    live_timeout: int = field(
+        default_factory=lambda: int(os.environ.get("LIVE_TIMEOUT", "12"))
+    )
+    # Shorter timeout for bulk region/ranking sweeps, where one slow upstream
+    # response would otherwise stall the whole grid.
+    bulk_timeout: int = field(
+        default_factory=lambda: int(os.environ.get("BULK_TIMEOUT", "6"))
+    )
+    # Thread pool size for bulk sweeps. Kept modest to stay inside the free
+    # tier's 2 vCPUs and to avoid tripping upstream rate limits.
+    bulk_max_workers: int = field(
+        default_factory=lambda: int(os.environ.get("BULK_MAX_WORKERS", "8"))
+    )
+    # Countries per World Bank request. The API accepts semicolon-separated
+    # ISO-3 codes, which turns a 100-country sweep into a handful of calls.
+    worldbank_batch_size: int = field(
+        default_factory=lambda: int(os.environ.get("WORLDBANK_BATCH_SIZE", "30"))
+    )
+    # How many years back to request, so year-over-year derivations and
+    # countries that report with a lag still resolve.
+    lookback_years: int = field(
+        default_factory=lambda: int(os.environ.get("LOOKBACK_YEARS", "6"))
+    )
 
 
 @dataclass

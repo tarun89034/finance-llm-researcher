@@ -10,9 +10,9 @@ import time
 from typing import Dict, List, Optional, Tuple, Any
 
 from model_loader import model_loader
-from data_fetcher import data_fetcher, get_data, TriangulatedData
+from data_fetcher import data_fetcher, get_data, get_many, TriangulatedData
 from countries import COUNTRIES, REGIONS
-from indicators import INDICATORS, format_value
+from indicators import INDICATORS
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +182,13 @@ class ChatEngine:
         
         return intent
     
-    def fetch_relevant_data(self, intent: Dict) -> List[TriangulatedData]:
+    def fetch_relevant_data(self, intent: Dict, use_live: bool = True) -> List[TriangulatedData]:
         """
         Fetch data based on detected intent.
         
         Args:
             intent: Detected intent dictionary
+            use_live: Whether to fetch from live APIs or use modelled values
             
         Returns:
             List of TriangulatedData objects
@@ -198,30 +199,36 @@ class ChatEngine:
             # Get global or regional ranking
             for indicator in intent["indicators"][:1]:  # Limit to first indicator
                 if intent["is_regional"] and intent["region"]:
-                    ranking_data = data_fetcher.get_region_data(indicator, intent["region"])
+                    ranking_data = data_fetcher.get_region_data(
+                        indicator, intent["region"], live=use_live
+                    )
                 else:
-                    ranking_data = data_fetcher.get_global_ranking(indicator, limit=10)
+                    ranking_data = data_fetcher.get_global_ranking(
+                        indicator, limit=10, live=use_live
+                    )
                 data.extend(ranking_data)
         
         elif intent["type"] == "regional":
             # Get regional data
             for indicator in intent["indicators"][:2]:  # Limit to 2 indicators
-                regional_data = data_fetcher.get_region_data(indicator, intent["region"])
+                regional_data = data_fetcher.get_region_data(
+                    indicator, intent["region"], live=use_live
+                )
                 data.extend(regional_data[:10])
         
         elif intent["type"] == "comparison":
-            # Get comparison data
-            for country in intent["countries"][:3]:  # Limit to 3 countries
-                for indicator in intent["indicators"][:2]:  # Limit to 2 indicators
-                    country_data = get_data(indicator, country)
-                    if country_data.consensus_value is not None:
-                        data.append(country_data)
+            # Get comparison data - use bulk fetch
+            for indicator in intent["indicators"][:2]:  # Limit to 2 indicators
+                comparison_data = get_many(
+                    indicator, intent["countries"][:3], live=use_live
+                )
+                data.extend(comparison_data)
         
         elif intent["type"] == "single_country":
             # Get single country data
             for country in intent["countries"][:1]:  # Limit to first country
                 for indicator in intent["indicators"][:3]:  # Limit to 3 indicators
-                    country_data = get_data(indicator, country)
+                    country_data = get_data(indicator, country, live=use_live)
                     if country_data.consensus_value is not None:
                         data.append(country_data)
         
@@ -235,10 +242,29 @@ class ChatEngine:
             return ""
         
         lines = ["### DATA CONTEXT:"]
+        
+        # Detect whether the batch is live or modelled so the model knows.
+        live_count = sum(1 for d in data if d.is_live)
+        if live_count > 0:
+            lines.append(f"Data mode: LIVE from upstream APIs ({live_count}/{len(data)} resolved live)")
+        else:
+            lines.append("Data mode: MODELLED (regional baseline)")
+        
         for d in data:
-            val = format_value(d.indicator_code, d.consensus_value)
+            # Format value based on indicator type
+            if d.indicator_code == "gdp_per_capita":
+                val = f"${d.consensus_value:,.0f}"
+            elif d.indicator_code == "consumer_confidence":
+                val = f"{d.consensus_value:.1f}"
+            else:
+                val = f"{d.consensus_value:.2f}%"
+            
             # Dense single-line format to save tokens and speed up TTFT
-            context_line = f"- {d.country_name} ({d.region}) | {d.indicator_name}: {val} | Conf: {d.confidence_level} | Assess: {d.assessment_label} | Period: {d.period}"
+            context_line = (
+                f"- {d.country_name} ({d.region}) | {d.indicator_name}: {val} | "
+                f"Conf: {d.confidence_level} | Assess: {d.assessment_label} | "
+                f"Period: {d.period} | Source: {d.source_note}"
+            )
             lines.append(context_line)
         
         return "\n".join(lines)
@@ -253,7 +279,7 @@ class ChatEngine:
         
         Args:
             user_query: The user's input query
-            use_live_data: Whether to fetch and include live data
+            use_live_data: Whether to fetch and include live API data
             
         Yields:
             Chunks of text, and finally a list of TriangulatedData
@@ -265,7 +291,7 @@ class ChatEngine:
         data = []
         if use_live_data:
             start_fetch = time.time()
-            data = self.fetch_relevant_data(intent)
+            data = self.fetch_relevant_data(intent, use_live=use_live_data)
             fetch_duration = time.time() - start_fetch
             logger.info(f"PROFILING: Data fetch took {fetch_duration:.2f}s")
         

@@ -568,7 +568,7 @@ Sources: FRED, World Bank, OECD"""
             with open(output_path, 'w', encoding='utf-8') as f:
                 for sample in train_samples:
                     f.write(json.dumps(sample, ensure_ascii=False) + '\n')
-training_data_builder            
+
             # Save validation data
             val_path = config.validation_data_path
             with open(val_path, 'w', encoding='utf-8') as f:
