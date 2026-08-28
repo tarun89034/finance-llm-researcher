@@ -1,0 +1,175 @@
+# Fine-Tuning: what is actually true
+
+This document settles the "QLoRA fine-tuned Mistral-7B" claim that appears in
+`README.md`, `app/model_loader.py`, and the app footer.
+
+**Verdict: the claim is real, and it is kept.** Everything below is derived from
+the published artefacts, not from memory. What could not be verified is listed
+as unknown rather than filled in with plausible-sounding numbers.
+
+---
+
+## 1. Evidence the served model is genuinely fine-tuned
+
+The app serves `ty8890/financial-copilot-80countries-12indicators-gguf` →
+`mistral-7b-instruct-v0.3.Q4_K_M.gguf`. That filename is inherited from the base
+model by Unsloth's GGUF exporter and is *not* evidence that the weights are
+stock. Three independent checks say they are not:
+
+| Check | Result |
+| --- | --- |
+| Matching PEFT adapter is published | `ty8890/financial-copilot-80countries-12indicators-lora` — a real `adapter_model.safetensors` (167,832,240 B) with `adapter_config.json` |
+| Chat template baked into the GGUF | Alpaca-style `### Instruction:` / `### Response:`. Stock `Mistral-7B-Instruct-v0.3` ships `[INST] … [/INST]`. The GGUF's template matches the adapter repo's `chat_template.jinja` exactly apart from a leading `{{ bos_token }}`, which Unsloth strips on export (the GGUF repo's own README notes "BOS token behavior was adjusted for GGUF compatibility") |
+| Provenance metadata | GGUF repo `config.json` carries `"unsloth_version": "2026.2.1"`; both repos are tagged `unsloth`, and both were last written at `2026-02-12T16:34Z` — one training run, exported twice (adapter + merged GGUF) |
+
+> **Ignore the `Modelfile` in the GGUF repo.** It contains Unsloth's boilerplate
+> Ollama template for Mistral, which uses `[INST] … [/INST]` — the *base* model's
+> format, not the one this model was tuned on. The authoritative format is the
+> Alpaca template embedded in the GGUF itself, which is what
+> `ModelLoader._build_prompt` reproduces.
+
+An earlier run from the same author exists (`financial-mistral-qlora` /
+`-qlora-gguf`, 2026-02-02). The app does **not** use it.
+
+---
+
+## 2. Verified hyperparameters
+
+Source: `adapter_config.json` in the adapter repo. These are the real values, not
+a reconstruction.
+
+| Parameter | Value | Note |
+| --- | --- | --- |
+| Base model | `unsloth/mistral-7b-instruct-v0.3-bnb-4bit` | 4-bit NF4 base — this is what makes it **Q**LoRA rather than plain LoRA |
+| `peft_type` | `LORA` | |
+| `task_type` | `CAUSAL_LM` | |
+| `r` | `16` | |
+| `lora_alpha` | `32` | scaling α/r = 2.0 |
+| `lora_dropout` | `0.0` | |
+| `bias` | `none` | biases frozen |
+| `use_rslora` | `false` | plain α/r scaling, not α/√r |
+| `use_dora` | `false` | |
+| `init_lora_weights` | `true` | default init (A Kaiming, B zeros) |
+| `modules_to_save` | `null` | embeddings and `lm_head` stayed frozen |
+| `target_modules` | `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj` | all 7 projections — attention *and* MLP |
+| PEFT version | `0.18.1` | |
+| Unsloth version | `2026.2.1` | from the merged repo's `config.json` |
+
+### Trainable parameter count (derived, and cross-checked)
+
+Mistral-7B-v0.3 geometry: 32 layers, `hidden=4096`, `intermediate=14336`,
+32 heads × 128 head_dim, 8 KV heads (so `k_proj`/`v_proj` are 4096→1024).
+With `r=16`, per layer:
+
+| Module | Shape | LoRA params |
+| --- | --- | --- |
+| `q_proj` | 4096→4096 | 131,072 |
+| `k_proj` | 4096→1024 | 81,920 |
+| `v_proj` | 4096→1024 | 81,920 |
+| `o_proj` | 4096→4096 | 131,072 |
+| `gate_proj` | 4096→14336 | 294,912 |
+| `up_proj` | 4096→14336 | 294,912 |
+| `down_proj` | 14336→4096 | 294,912 |
+| **per layer** | | **1,310,720** |
+
+× 32 layers = **41,943,040 trainable parameters**, i.e. **0.58 %** of the
+7,248,023,552-parameter base.
+
+Cross-check: 41,943,040 × 4 bytes (fp32) = 167,772,160 B, plus a 60,080 B
+safetensors header = **167,832,240 B** — exactly the published adapter size. The
+derivation is confirmed by the artefact.
+
+### Trainer settings — NOT recoverable
+
+| Parameter | Status |
+| --- | --- |
+| Learning rate | unknown |
+| Epochs / max_steps | unknown |
+| Per-device batch size | unknown |
+| Gradient accumulation | unknown |
+| Warmup, LR schedule | unknown |
+| Optimizer (`adamw_8bit`?) | unknown |
+| `max_seq_length` | unknown |
+| Seed | unknown |
+
+Neither HF repo publishes them: the adapter's model card is the untouched
+auto-generated PEFT template, and there is no `training_args.bin` or
+`trainer_state.json` in the repo tree. The training notebook has never been in
+this git repository (`git log --all --name-only` shows no `.ipynb` at any
+commit). These are left blank deliberately — writing in "2 epochs, 2e-4, cosine"
+because that is the Unsloth default would be a fabrication.
+
+**If you still have the Colab/Unsloth notebook, fill in the table above from its
+`SFTConfig`/`TrainingArguments` block and commit it into `scripts/`. That is the
+only way these become known.**
+
+---
+
+## 3. Training data — synthetic, by design
+
+Generated by `data_pipeline/`, deterministic at `seed=42`. Regenerate with
+`python -m data_pipeline.main`; the numbers below are from an actual run
+(`data_pipeline/output/metadata.json`).
+
+| | |
+| --- | --- |
+| Total samples | **4,304** |
+| Train / validation | 3,873 / 431 (10 % split) |
+| Countries covered | 102 (of 103 configured) |
+| Indicators | 12 |
+| Regions | 14 sub-regions (8 macro regions) |
+| Format | Alpaca triples: `instruction` / `input` / `output` |
+
+Composition: 3,672 single-indicator queries, 504 comparisons, 104 regional
+analyses, 24 rankings.
+
+Rendered sample length (Alpaca-formatted, ~chars/3.6): median ≈ 513 tokens,
+p95 ≈ 538, max ≈ 569.
+
+**The indicator values in the training set are simulated.**
+`data_pipeline/data_generator.py` samples around hard-coded regional baselines —
+it does not scrape FRED or the World Bank. The fine-tune therefore taught the
+model the *shape* of a triangulated macro analysis (source table, consensus
+value, confidence grade, risk assessment, regional framing), not the facts.
+Real figures are injected at inference time by `app/data_fetcher.py`, which is
+why every prompt carries a `### DATA CONTEXT:` block. Do not treat an
+unaugmented generation as a source of actual macroeconomic numbers.
+
+---
+
+## 4. Prompt format, and one known deviation
+
+Every training sample was an Alpaca `instruction` / `input` / `output` triple
+where `instruction` was the ~900-character `SYSTEM_INSTRUCTION` in
+`data_pipeline/training_data_builder.py`.
+
+`ModelLoader._build_prompt` reproduces that three-field layout, but since commit
+`6c729e2` ("Phase 3: Ultra-fast tuning") it substitutes a skeletal instruction:
+
+```
+Senior Analyst. Provide concise analysis using data provided.
+```
+
+This is a deliberate latency trade: the full instruction tokenizes to 221
+tokens and the skeletal one to 13, a measured **208-token saving** worth roughly
+6-7 s of prefill on the production config. The cost is that the prompt no longer
+matches the distribution the adapter was trained on. If output structure
+regresses, restore the full `SYSTEM_INSTRUCTION` first - that is the most likely
+cause.
+
+Do not restore it blindly, though: +208 tokens pushes the ranking prompt past
+`n_ctx=768` and the request fails outright. See [PROFILING.md](PROFILING.md)
+Findings 1 and 3.
+
+---
+
+## 5. Naming and config drift to be aware of
+
+- The model repo is named `…-80countries-…`; the pipeline actually covers 102.
+  The name is historical and is kept because renaming it breaks the deployed
+  Space.
+- `README.md` previously said "7 regions". There are 14 sub-regions grouped into
+  8 macro regions; the README has been corrected.
+- The local `.env` sets `MODEL_THREADS=4`. `.env` is gitignored and absent on the
+  Space, so production runs the code default of **2** threads. Profile with the
+  defaults, not with your `.env`.

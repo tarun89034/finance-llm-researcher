@@ -35,3 +35,6 @@ nul
 # Misc
 *.log
 New folder/
+
+# Generated training data (regenerate: python -m data_pipeline.main)
+data_pipeline/output/
