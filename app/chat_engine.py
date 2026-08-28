@@ -10,6 +10,7 @@ import time
 from typing import Dict, List, Optional, Tuple, Any
 
 from model_loader import model_loader
+from config import model_config
 from data_fetcher import data_fetcher, get_data, get_many, TriangulatedData
 from countries import COUNTRIES, REGIONS
 from indicators import INDICATORS
@@ -103,6 +104,54 @@ METRIC_KEYWORDS: Dict[str, List[str]] = {
 }
 
 
+# Words that say which end of a ranking the user wants. Only consulted once a
+# query has already been classified as a ranking, so adding a common word like
+# "most" here cannot change which branch a query takes.
+#
+# "highest"/"lowest" order by raw value; "best"/"worst" order by the indicator's
+# higher_is_better. They differ for anything where a bigger number is worse --
+# "highest unemployment" and "best unemployment" are opposite ends of the list.
+RANKING_DIRECTION_WORDS: List[Tuple[str, str]] = [
+    ("highest", "highest"), ("top", "highest"), ("most", "highest"),
+    ("largest", "highest"), ("greatest", "highest"), ("biggest", "highest"),
+    ("leading", "highest"), ("max", "highest"), ("maximum", "highest"),
+    ("lowest", "lowest"), ("least", "lowest"), ("smallest", "lowest"),
+    ("bottom", "lowest"), ("fewest", "lowest"), ("min", "lowest"),
+    ("minimum", "lowest"),
+    ("best", "best"),
+    ("worst", "worst"),
+]
+
+
+# How each direction reads in the prompt, so the model captions the list the
+# way it was actually sorted.
+RANKING_ORDER_NOTES: Dict[Optional[str], str] = {
+    "highest": "highest value first",
+    "lowest": "lowest value first",
+    "best": "best performer first",
+    "worst": "worst performer first",
+    None: "best performer first",
+}
+
+
+def detect_ranking_direction(query_lower: str) -> Optional[str]:
+    """
+    Return "highest" / "lowest" / "best" / "worst", or None if unstated.
+
+    The earliest word in the sentence wins, so "highest unemployment, worst
+    first" resolves to the phrasing the user led with. Matching is on word
+    boundaries -- otherwise "most" fires on "almost" and "top" on "stop".
+    """
+    best_pos = None
+    best_direction = None
+    for word, direction in RANKING_DIRECTION_WORDS:
+        match = re.search(rf"\b{word}\b", query_lower)
+        if match and (best_pos is None or match.start() < best_pos):
+            best_pos = match.start()
+            best_direction = direction
+    return best_direction
+
+
 class ChatEngine:
     """Orchestrates chat interactions with live data integration."""
     
@@ -128,6 +177,7 @@ class ChatEngine:
             "indicators": [],
             "is_comparison": False,
             "is_ranking": False,
+            "ranking_direction": None,
             "is_regional": False,
             "region": None,
         }
@@ -159,6 +209,8 @@ class ChatEngine:
         # Detect ranking intent
         ranking_words = ["ranking", "top", "highest", "lowest", "best", "worst", "rank", "leading"]
         intent["is_ranking"] = any(w in query_lower for w in ranking_words)
+        if intent["is_ranking"]:
+            intent["ranking_direction"] = detect_ranking_direction(query_lower)
         
         # Detect regional intent
         for region in REGIONS.keys():
@@ -196,15 +248,17 @@ class ChatEngine:
         data = []
         
         if intent["type"] == "ranking":
-            # Get global or regional ranking
+            # Get global or regional ranking, ordered the way the user asked
+            direction = intent.get("ranking_direction")
             for indicator in intent["indicators"][:1]:  # Limit to first indicator
                 if intent["is_regional"] and intent["region"]:
                     ranking_data = data_fetcher.get_region_data(
-                        indicator, intent["region"], live=use_live
+                        indicator, intent["region"], live=use_live,
+                        direction=direction
                     )
                 else:
                     ranking_data = data_fetcher.get_global_ranking(
-                        indicator, limit=10, live=use_live
+                        indicator, limit=10, live=use_live, direction=direction
                     )
                 data.extend(ranking_data)
         
@@ -234,7 +288,11 @@ class ChatEngine:
         
         return data
     
-    def format_data_context(self, data: List[TriangulatedData]) -> str:
+    def format_data_context(
+        self,
+        data: List[TriangulatedData],
+        intent: Optional[Dict] = None
+    ) -> str:
         """
         Format fetched data as context for the model (compressed for speed).
         """
@@ -249,6 +307,15 @@ class ChatEngine:
             lines.append(f"Data mode: LIVE from upstream APIs ({live_count}/{len(data)} resolved live)")
         else:
             lines.append("Data mode: MODELLED (regional baseline)")
+        
+        # State the sort order explicitly. Without this the model narrates
+        # whatever ranking criteria it saw most often in training, which is how
+        # a "highest unemployment" list came back captioned "Lowest values".
+        if intent and intent.get("is_ranking"):
+            lines.append(
+                f"Rows are already sorted {RANKING_ORDER_NOTES[intent.get('ranking_direction')]}. "
+                "List them in the order given."
+            )
         
         for d in data:
             # Format value based on indicator type
@@ -269,6 +336,53 @@ class ChatEngine:
         
         return "\n".join(lines)
     
+    def build_model_input(
+        self,
+        user_query: str,
+        data: List[TriangulatedData],
+        intent: Optional[Dict] = None
+    ) -> Tuple[str, List[TriangulatedData]]:
+        """
+        Assemble what gets sent to the model, trimming data rows until the
+        answer has room to finish.
+
+        A ten-row ranking builds a ~600-token prompt, which inside a 768-token
+        window leaves too little for a complete reply -- the model stops
+        mid-word with nothing to signal it. Dropping the tail rows is what
+        actually buys a whole answer; clamping max_tokens alone only makes the
+        truncation tidier.
+
+        Returns the prompt input and the rows that survived, so callers can
+        show exactly what the model saw.
+        """
+        def build(rows: List[TriangulatedData]) -> str:
+            context = self.format_data_context(rows, intent) if rows else ""
+            if not context:
+                return user_query
+            return f"{user_query}\n\n{context}"
+
+        enhanced_query = build(data)
+        if not data:
+            return enhanced_query, data
+
+        kept = len(data)
+        while (
+            kept > 1
+            and model_loader.answer_budget(enhanced_query)
+            < model_config.min_answer_tokens
+        ):
+            kept -= 1
+            enhanced_query = build(data[:kept])
+
+        if kept < len(data):
+            logger.info(
+                f"PROFILING: trimmed data context {len(data)} -> {kept} rows "
+                f"to leave {model_config.min_answer_tokens}+ tokens for the answer"
+            )
+            data = data[:kept]
+
+        return enhanced_query, data
+
     def generate_response(
         self,
         user_query: str,
@@ -295,14 +409,8 @@ class ChatEngine:
             fetch_duration = time.time() - start_fetch
             logger.info(f"PROFILING: Data fetch took {fetch_duration:.2f}s")
         
-        # Build enhanced prompt with data context
-        data_context = self.format_data_context(data) if data else ""
-        
-        if data_context:
-            enhanced_query = f"{user_query}\n\n{data_context}"
-        else:
-            enhanced_query = user_query
-        
+        enhanced_query, data = self.build_model_input(user_query, data, intent)
+
         # Generate response from model
         full_response = ""
         try:
@@ -319,6 +427,16 @@ class ChatEngine:
             
             gen_duration = time.time() - start_gen
             logger.info(f"PROFILING: Total generation took {gen_duration:.2f}s")
+
+            # Trimming makes this rare, but a verbose answer can still run out
+            # the clamped budget. Say so rather than ending mid-sentence.
+            if model_loader.last_finish_reason == "length":
+                notice = (
+                    "\n\n_(Response cut short at the model's context limit. "
+                    "Ask about fewer countries or one indicator for a full answer.)_"
+                )
+                full_response += notice
+                yield notice, None
         except Exception as e:
             logger.error(f"Model generation error: {e}")
             error_msg = f"I apologize, but I encountered an error generating a response: {str(e)}"

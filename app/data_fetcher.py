@@ -622,22 +622,24 @@ class DataFetcher:
         self,
         indicator_code: str,
         region: str,
-        live: Optional[bool] = None
+        live: Optional[bool] = None,
+        direction: Optional[str] = None
     ) -> List[TriangulatedData]:
-        """Get data for every country in a region, ranked."""
+        """Get data for every country in a region, ranked (see _sort_by_indicator)."""
         results = self.fetch_many(indicator_code, REGIONS.get(region, []), live=live)
-        return _sort_by_indicator(results, indicator_code)
+        return _sort_by_indicator(results, indicator_code, direction)
 
     def get_global_ranking(
         self,
         indicator_code: str,
         limit: int = 20,
-        live: Optional[bool] = None
+        live: Optional[bool] = None,
+        direction: Optional[str] = None
     ) -> List[TriangulatedData]:
-        """Get the global ranking for an indicator."""
+        """Get the global ranking for an indicator (see _sort_by_indicator)."""
         codes = [c for c in COUNTRIES if c != "EUU"]
         results = self.fetch_many(indicator_code, codes, live=live)
-        return _sort_by_indicator(results, indicator_code)[:limit]
+        return _sort_by_indicator(results, indicator_code, direction)[:limit]
 
 
 # =============================================================================
@@ -702,13 +704,40 @@ def _worldbank_point(series: List[Tuple[str, float]], indicator) -> DataPoint:
 
 def _sort_by_indicator(
     results: List[TriangulatedData],
-    indicator_code: str
+    indicator_code: str,
+    direction: Optional[str] = None
 ) -> List[TriangulatedData]:
-    """Sort results best-first according to the indicator's direction."""
+    """
+    Sort results according to the requested direction.
+
+    direction:
+        "highest" -- largest raw value first, whatever that means for the
+                     indicator ("which countries have the highest unemployment")
+        "lowest"  -- smallest raw value first
+        "best"    -- best performer first, per the indicator's higher_is_better
+        "worst"   -- worst performer first
+        None      -- same as "best"; this is what the dashboard tabs want
+
+    "best"/"worst" and "highest"/"lowest" only coincide for indicators where a
+    larger number is unambiguously better, which is why the caller has to say
+    which one it meant.
+    """
     indicator = INDICATORS.get(indicator_code)
-    reverse = True
+    # Indicators with no inherent good/bad direction (interest rate, trade
+    # balance, ...) fall back to descending, preserving previous behaviour.
+    higher_is_better = True
     if indicator and indicator.higher_is_better is not None:
-        reverse = indicator.higher_is_better
+        higher_is_better = indicator.higher_is_better
+
+    if direction == "highest":
+        reverse = True
+    elif direction == "lowest":
+        reverse = False
+    elif direction == "worst":
+        reverse = not higher_is_better
+    else:  # "best" or unspecified
+        reverse = higher_is_better
+
     usable = [r for r in results if r.consensus_value is not None]
     usable.sort(key=lambda r: r.consensus_value, reverse=reverse)
     return usable

@@ -157,9 +157,12 @@ matches the distribution the adapter was trained on. If output structure
 regresses, restore the full `SYSTEM_INSTRUCTION` first - that is the most likely
 cause.
 
-Do not restore it blindly, though: +208 tokens pushes the ranking prompt past
-`n_ctx=768` and the request fails outright. See [PROFILING.md](PROFILING.md)
-Findings 1 and 3.
+Restoring it is now affordable but not free. With `n_ctx` raised to 1024, +208
+tokens puts the largest prompt the app builds (a ten-row ranking, 631 tokens) at
+~839 — still inside the window, but leaving only ~160 tokens for the answer,
+which trips the context trimming and costs two or three ranking rows. Budget
+roughly 7 s of extra prefill plus those rows. See
+[PROFILING.md](PROFILING.md).
 
 ---
 
@@ -172,4 +175,9 @@ Findings 1 and 3.
   8 macro regions; the README has been corrected.
 - The local `.env` sets `MODEL_THREADS=4`. `.env` is gitignored and absent on the
   Space, so production runs the code default of **2** threads. Profile with the
-  defaults, not with your `.env`.
+  defaults, not with your `.env` — `scripts/profile_inference.py` clears the
+  `MODEL_*` overrides for exactly this reason.
+- `n_ctx` was raised from 768 to **1024** to stop ranking answers being cut off.
+  The old value cost nothing in latency and only saved ~32 MB of KV cache; see
+  [PROFILING.md](PROFILING.md) for the measurements. The local `.env` was
+  updated to match.

@@ -30,6 +30,12 @@ class ModelLoader:
     def __init__(self):
         self.model_path: Optional[str] = None
         self.is_loaded: bool = False
+        # Set by generate_stream so callers can tell a complete answer from one
+        # the context window cut short. "stop" = model finished, "length" = hit
+        # the cap. Mirrors llama.cpp's finish_reason.
+        self.last_finish_reason: Optional[str] = None
+        self.last_prompt_tokens: int = 0
+        self.last_completion_tokens: int = 0
     
     def download_model(self) -> str:
         """Download model from HuggingFace Hub if not present locally."""
@@ -119,6 +125,31 @@ class ModelLoader:
             full_text += chunk
         return full_text
 
+    def count_tokens(self, text: str) -> int:
+        """Token count for a raw string, using the model's own tokenizer."""
+        if not self.is_loaded:
+            self.load_model()
+        return len(self._model.tokenize(text.encode("utf-8"), add_bos=True))
+
+    def prompt_tokens(self, user_input: str) -> int:
+        """Token count of the full prompt that user_input would produce."""
+        return self.count_tokens(self._build_prompt(user_input))
+
+    def answer_budget(self, user_input: str) -> int:
+        """
+        Tokens left inside n_ctx for the answer once the prompt is in place.
+
+        Callers use this to shrink the data context *before* generating, which
+        is the only fix that yields a complete answer rather than a shorter
+        truncated one.
+        """
+        remaining = (
+            model_config.n_ctx
+            - self.prompt_tokens(user_input)
+            - model_config.context_safety_margin
+        )
+        return max(0, remaining)
+
     def generate_stream(
         self,
         prompt: str,
@@ -132,9 +163,39 @@ class ModelLoader:
         
         full_prompt = self._build_prompt(prompt)
         
+        # Clamp the request to what actually fits. Asking for max_tokens=500
+        # behind a 608-token prompt in a 768-token window does not produce a
+        # 500-token answer -- it produces 160 tokens and a mid-word cut.
+        requested = max_tokens or model_config.max_tokens
+        prompt_tokens = self.count_tokens(full_prompt)
+        budget = max(
+            0,
+            model_config.n_ctx - prompt_tokens - model_config.context_safety_margin,
+        )
+        effective_max = min(requested, budget)
+        
+        self.last_finish_reason = None
+        self.last_prompt_tokens = prompt_tokens
+        self.last_completion_tokens = 0
+        
+        if effective_max <= 0:
+            # The prompt alone fills the window; nothing can be generated.
+            logger.error(
+                f"Prompt of {prompt_tokens} tokens leaves no room in n_ctx="
+                f"{model_config.n_ctx}; refusing to generate"
+            )
+            self.last_finish_reason = "length"
+            return
+        
+        if effective_max < requested:
+            logger.info(
+                f"PROFILING: capping max_tokens {requested} -> {effective_max} "
+                f"(prompt {prompt_tokens} tokens, n_ctx {model_config.n_ctx})"
+            )
+        
         stream = self._model(
             full_prompt,
-            max_tokens=max_tokens or model_config.max_tokens,
+            max_tokens=effective_max,
             temperature=temperature or model_config.temperature,
             top_p=model_config.top_p,
             top_k=model_config.top_k,
@@ -144,8 +205,14 @@ class ModelLoader:
         )
         
         for chunk in stream:
-            text = chunk["choices"][0]["text"]
-            yield text
+            choice = chunk["choices"][0]
+            text = choice["text"]
+            # The final chunk carries finish_reason; earlier ones carry None.
+            if choice.get("finish_reason"):
+                self.last_finish_reason = choice["finish_reason"]
+            if text:
+                self.last_completion_tokens += 1
+                yield text
     
     def _build_prompt(self, user_input: str) -> str:
         """Skeletal system prompt for maximum speed."""

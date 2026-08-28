@@ -23,15 +23,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Production configuration: the defaults in app/config.py, pinned here so a
-# developer .env cannot silently change what is being measured.
-PROD_ENV = {
-    "MODEL_CONTEXT_LENGTH": "768",
-    "MODEL_THREADS": "2",
-    "MODEL_GPU_LAYERS": "0",
-    "MODEL_MAX_TOKENS": "500",
-    "MODEL_TEMPERATURE": "0.7",
-}
+# The Space runs with no .env, so ModelConfig's own defaults *are* the
+# production configuration. Clearing these rather than restating their values
+# means the profiler cannot drift out of sync with app/config.py -- an earlier
+# version pinned n_ctx=768 here and kept reporting it after the default moved.
+PROD_ENV_UNSET = (
+    "MODEL_CONTEXT_LENGTH",
+    "MODEL_THREADS",
+    "MODEL_GPU_LAYERS",
+    "MODEL_MAX_TOKENS",
+    "MODEL_TEMPERATURE",
+    "MODEL_CONTEXT_SAFETY_MARGIN",
+    "MODEL_MIN_ANSWER_TOKENS",
+)
 
 # One query per intent branch in ChatEngine.detect_intent, so the run covers
 # the cheap and the expensive data paths rather than a single best case.
@@ -65,13 +69,18 @@ def main():
                         help="Skip upstream API calls and profile the model alone")
     args = parser.parse_args()
 
-    os.environ.update(PROD_ENV)
+    def drop_local_overrides():
+        for name in PROD_ENV_UNSET:
+            os.environ.pop(name, None)
+
+    drop_local_overrides()
     sys.path.insert(0, str(REPO_ROOT / "app"))
     os.chdir(REPO_ROOT)
 
     import config
-    # A .env is loaded at import time; re-pin so the run is reproducible.
-    os.environ.update(PROD_ENV)
+    # Importing config loads any .env, which puts the developer's overrides
+    # back into the environment; drop them again and rebuild from defaults.
+    drop_local_overrides()
     config.model_config = config.ModelConfig()
     model_config = config.model_config
 
@@ -92,6 +101,8 @@ def main():
             "n_batch": 128,
             "max_tokens": model_config.max_tokens,
             "temperature": model_config.temperature,
+            "context_safety_margin": model_config.context_safety_margin,
+            "min_answer_tokens": model_config.min_answer_tokens,
         },
         "live_data": use_live,
         "queries": [],
@@ -111,10 +122,12 @@ def main():
         data = chat_engine.fetch_relevant_data(intent, use_live=use_live) if use_live else []
         fetch_s = time.perf_counter() - t_fetch
 
-        data_context = chat_engine.format_data_context(data) if data else ""
-        enhanced = f"{query}\n\n{data_context}" if data_context else query
+        # Same assembly the app uses, including the context trimming, so these
+        # numbers describe the shipped path rather than an idealised one.
+        fetched_rows = len(data)
+        enhanced, data = chat_engine.build_model_input(query, data, intent)
         prompt = model_loader._build_prompt(enhanced)
-        prompt_tokens = len(llm.tokenize(prompt.encode("utf-8"), add_bos=True))
+        prompt_tokens = model_loader.count_tokens(prompt)
 
         t_gen = time.perf_counter()
         ttft = None
@@ -142,7 +155,9 @@ def main():
         record = {
             "kind": kind,
             "query": query,
-            "data_rows": len(data),
+            "ranking_direction": intent.get("ranking_direction"),
+            "data_rows_fetched": fetched_rows,
+            "data_rows_sent": len(data),
             "live_rows": sum(1 for d in data if getattr(d, "is_live", False)),
             "data_fetch_seconds": round(fetch_s, 2),
             "prompt_tokens": prompt_tokens,
@@ -153,14 +168,17 @@ def main():
             "decode_tokens_per_second": decode_tps,
             "wall_clock_seconds": round(fetch_s + gen_s, 2),
             "response_chars": len(text),
-            "hit_max_tokens": n_tokens >= model_config.max_tokens,
+            # "stop" = the model finished; "length" = the window cut it off.
+            "finish_reason": model_loader.last_finish_reason,
+            "truncated": model_loader.last_finish_reason == "length",
             "error": error,
         }
         run["queries"].append(record)
         print("  " + json.dumps({k: record[k] for k in (
-            "data_fetch_seconds", "prompt_tokens", "context_headroom_tokens",
-            "time_to_first_token_seconds", "generation_seconds",
-            "completion_tokens", "decode_tokens_per_second")}), flush=True)
+            "data_rows_fetched", "data_rows_sent", "prompt_tokens",
+            "context_headroom_tokens", "time_to_first_token_seconds",
+            "generation_seconds", "completion_tokens",
+            "decode_tokens_per_second", "finish_reason")}), flush=True)
 
     out = REPO_ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)

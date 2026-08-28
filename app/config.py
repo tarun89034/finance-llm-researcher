@@ -48,8 +48,14 @@ class ModelConfig:
     local_model_path: str = "models/financial-copilot.gguf"
     
     # Model parameters
+    # 768 was too small: a ten-row ranking builds a ~630-token prompt, leaving
+    # no room for the answer. Measured on the production config, n_ctx has no
+    # effect on latency for a given prompt (21.36s / 21.39s / 21.59s TTFT at
+    # 768 / 1024 / 1536 for the same 527-token prompt) -- it only costs KV
+    # cache, ~128 KB per token. 1024 fits the largest prompt this app builds
+    # plus a full answer.
     n_ctx: int = field(
-        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "768"))
+        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_LENGTH", "1024"))
     )
     n_threads: int = field(
         default_factory=lambda: int(os.environ.get("MODEL_THREADS", "2"))
@@ -68,6 +74,21 @@ class ModelConfig:
     top_p: float = 0.9
     top_k: int = 40
     repeat_penalty: float = 1.1
+
+    # --- Context budgeting ---------------------------------------------------
+    # prompt + completion must stay under n_ctx or llama.cpp stops mid-word with
+    # finish_reason="length". These two keep max_tokens honest at request time.
+    #
+    # Tokens held back from the budget so a capped answer has room to close its
+    # final sentence instead of ending exactly on the context wall.
+    context_safety_margin: int = field(
+        default_factory=lambda: int(os.environ.get("MODEL_CONTEXT_SAFETY_MARGIN", "24"))
+    )
+    # Answer budget below which the data context is trimmed rather than
+    # generating a stub. A ranking needs ~15 tokens per row plus a preamble.
+    min_answer_tokens: int = field(
+        default_factory=lambda: int(os.environ.get("MODEL_MIN_ANSWER_TOKENS", "256"))
+    )
 
 
 @dataclass
